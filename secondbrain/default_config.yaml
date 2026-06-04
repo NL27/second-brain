@@ -1,0 +1,60 @@
+# Second Brain - default configuration.
+# Copy to ./config.yaml in your project root to override. Environment
+# variables and CLI flags take precedence over this file.
+
+# Where to store versioned run logs and the SQLite index.
+paths:
+  logs_dir: logs
+  db_path: brain.db
+  rules_dir: rules
+
+# Model registry. Each entry is referenced by its key (e.g. "local-vision").
+# `model` uses liteLLM provider syntax:
+#   ollama/<name>            -> local via Ollama
+#   openai/<name>            -> OpenAI cloud
+#   anthropic/<name>         -> Anthropic cloud
+#   groq/<name>, deepseek/<name>, gemini/<name>, dashscope/<name> ...
+models:
+  local-vision:
+    model: ollama/ui-tars:7b
+    location: local
+    vision: true
+    notes: "Local GUI-grounding model for host control."
+  local-general:
+    model: ollama/qwen2.5:7b
+    location: local
+    vision: false
+    notes: "Local general reasoning model."
+  cloud-claude:
+    model: anthropic/claude-sonnet-4-5
+    location: cloud
+    vision: true
+    notes: "Cloud frontier model; strong computer-use."
+  cloud-gpt:
+    model: openai/gpt-4.1
+    location: cloud
+    vision: true
+    notes: "Cloud alternative for eval comparisons."
+
+# Which model the agent uses by default for control tasks.
+default_model: local-vision
+
+# How the agent acts on the computer.
+control:
+  # backend: cua | none
+  #   cua  -> use cua-agent + Cua Driver for background host control
+  #   none -> plan-only mode (LLM produces a step plan, nothing is executed)
+  backend: cua
+  # Max agent loop iterations per task.
+  max_steps: 40
+  # Seconds before a single tool action is abandoned.
+  step_timeout: 60
+
+# Safety. See rules/ for the per-task rule files this references.
+safety:
+  # Require explicit confirmation for any action tagged destructive.
+  require_approval_for_destructive: true
+  # Global kill: never execute, only plan + log.
+  dry_run: false
+  # Default rules file applied to every task.
+  default_rules: default

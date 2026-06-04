@@ -1,0 +1,20 @@
+# Core runtime
+pyyaml>=6.0
+python-dotenv>=1.0
+rich>=13.7
+typer>=0.12
+
+# Multi-LLM routing (local + cloud). liteLLM speaks to Ollama, OpenAI,
+# Anthropic, Groq, DeepSeek, Qwen, and ~100 other providers behind one API.
+litellm>=1.40
+
+# Computer-use orchestration brain (host control via the Cua Driver).
+# Requires Python >=3.11; install in a 3.11+ venv. The rest of this package
+# degrades gracefully (plan-only mode) if cua-agent is unavailable.
+# cua-agent[all]>=0.4
+
+# Optional: local code/CLI execution agent
+# open-interpreter>=0.4
+
+# Optional: Gradio chat UI
+# gradio>=4.0

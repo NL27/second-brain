@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secondbrain"
+version = "0.1.0"
+description = "Personal computer-control agent: a host-controlling, multi-LLM, fully-logged second brain core."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.7",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Multi-LLM routing across local + cloud providers.
+llm = ["litellm>=1.40"]
+# Host computer-use control (needs Python >=3.11).
+control = ["cua-agent[all]>=0.4"]
+# Local code/CLI execution.
+code = ["open-interpreter>=0.4"]
+# Web chat UI.
+ui = ["gradio>=4.0"]
+# Everything.
+all = [
+    "litellm>=1.40",
+    "cua-agent[all]>=0.4",
+    "open-interpreter>=0.4",
+    "gradio>=4.0",
+]
+
+[project.scripts]
+brain = "secondbrain.cli:main"
+
+[tool.setuptools]
+packages = ["secondbrain"]
+
+[tool.setuptools.package-data]
+secondbrain = ["default_config.yaml"]

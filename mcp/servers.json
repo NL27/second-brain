@@ -1,0 +1,41 @@
+{
+  "_comment": "MCP server registry - the interoperability/extensibility backbone. Each server is a tool surface the agent (or any MCP client like Cursor/Claude) can plug into. Phase 1 enables host control + shell; later phases add the rest. Fill in commands and enable as you install each server.",
+
+  "mcpServers": {
+    "mac-control": {
+      "_about": "Background macOS host control (screenshot, mouse, keyboard, accessibility). Alternative to the Cua Driver. See hyprcat/mac-cua (Apache-2.0) or syedazharmbnr1/computer-use-mcp.",
+      "enabled": false,
+      "command": "npx",
+      "args": ["-y", "mac-use-mcp"]
+    },
+
+    "shell": {
+      "_about": "Local code/CLI/IDE execution. Use Open Interpreter or a shell MCP server. Gated by rules/ before anything runs.",
+      "enabled": false,
+      "command": "uvx",
+      "args": ["mcp-shell-server"]
+    },
+
+    "n8n": {
+      "_about": "Phase 5: self-hosted n8n workflow automation via its MCP/REST surface.",
+      "enabled": false,
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": { "N8N_BASE_URL": "http://localhost:5678", "N8N_API_KEY": "" }
+    },
+
+    "knowledge": {
+      "_about": "Phase 2: second-brain vector search over your notes/summaries.",
+      "enabled": false,
+      "command": "uvx",
+      "args": ["mcp-knowledge-server"]
+    },
+
+    "calendar": {
+      "_about": "Phase 3: calendar + maps for meeting scheduling with travel time.",
+      "enabled": false,
+      "command": "uvx",
+      "args": ["mcp-calendar-server"]
+    }
+  }
+}

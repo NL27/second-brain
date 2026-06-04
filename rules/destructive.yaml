@@ -1,0 +1,27 @@
+name: destructive
+
+# A stricter rule set for tasks you know will touch sensitive things.
+# Use with: brain run-task "..." --rules destructive
+system_prompt: |
+  This task may involve destructive or sensitive operations. Require explicit,
+  itemized confirmation for EVERY write, delete, send, or system-level action.
+  Produce a dry-run summary first whenever the tooling supports it.
+
+require_approval_for_destructive: true
+
+# Broaden what counts as destructive: any write-like verb.
+destructive_patterns:
+  - "\\bwrite\\b"
+  - "\\bsave\\b"
+  - "\\boverwrite\\b"
+  - "\\bedit\\b"
+  - "\\binstall\\b"
+  - "\\bcommit\\b"
+  - "\\bcurl\\b .*\\|\\s*(sh|bash)"
+  - "\\bbrew\\b (install|uninstall|upgrade)"
+  - "\\bpip\\b install"
+  - "\\bnpm\\b (install|i)\\b"
+
+deny_patterns:
+  - "rm -rf /"
+  - "rm -rf ~"

@@ -1,0 +1,58 @@
+name: default
+
+# Instructions injected into every task's system prompt.
+system_prompt: |
+  You are a careful computer-control assistant operating the user's real Mac
+  in the background. Work step by step. Before any irreversible action,
+  explain what you will do and why. Prefer the least powerful action that
+  accomplishes the goal. Never exfiltrate secrets, credentials, or private
+  data. If a step is ambiguous or risky, stop and ask.
+
+# Actions matching these (case-insensitive) are treated as destructive and
+# require human approval when approval is enabled.
+destructive_patterns:
+  - "\\brm\\b"
+  - "\\brmdir\\b"
+  - "\\bdel\\b"
+  - "\\bmv\\b .* /"
+  - "\\bsudo\\b"
+  - "\\bchmod\\b"
+  - "\\bchown\\b"
+  - "\\bkill(all)?\\b"
+  - "\\bshutdown\\b"
+  - "\\breboot\\b"
+  - "\\bdiskutil\\b"
+  - "\\bmkfs\\b"
+  - "\\bgit\\b .*push"
+  - "\\bgit\\b .*reset --hard"
+  - "format"
+  - "uninstall"
+  - "drop table"
+  - "delete from"
+  - "send"        # messages / emails / payments
+  - "purchase"
+  - "pay\\b"
+  - "transfer"
+
+# Hard blocks: never executed, even with approval.
+deny_patterns:
+  - ":\\(\\)\\s*\\{.*\\};:"     # fork bomb
+  - "rm -rf /\\s*$"
+  - "rm -rf ~\\s*$"
+  - "/etc/sudoers"
+  - "Keychain"
+  - "\\.ssh/id_"
+  - "\\.aws/credentials"
+
+# Filesystem fences (advisory; enforced by tools that pass paths through).
+path_deny:
+  - "/System"
+  - "/Library/Keychains"
+  - "~/.ssh"
+  - "~/.aws"
+  - "~/.config/gh"
+path_allow: []
+
+# Application fences.
+app_deny: []
+app_allow: []

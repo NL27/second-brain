@@ -1,0 +1,25 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Run database (index is rebuildable; trajectories under logs/ are versioned)
+brain.db
+brain.db-journal
+brain.db-wal
+brain.db-shm
+
+# OS
+.DS_Store
+
+# Logs: keep the directory and committed trajectories, ignore scratch
+logs/tmp/
