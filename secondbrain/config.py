@@ -94,8 +94,35 @@ class Config:
         return int(self.raw["control"]["step_timeout"])
 
     @property
+    def smart_mode(self) -> bool:
+        return bool(self.raw["control"].get("smart_mode", False))
+
+    @property
+    def driver_model(self) -> Optional[str]:
+        """Model for the driver ReAct loop (defaults to the run's model_key)."""
+        return self.raw["control"].get("driver_model") or None
+
+    @property
+    def plan_before_act(self) -> bool:
+        return bool(self.raw["control"].get("plan_before_act", True))
+
+    @property
+    def auto_snapshot_after_launch(self) -> bool:
+        return bool(self.raw["control"].get("auto_snapshot_after_launch", True))
+
+    @property
+    def driver_temperature(self) -> float:
+        return float(self.raw["control"].get("driver_temperature", 0.15))
+
+    @property
     def default_model(self) -> str:
         return self.raw["default_model"]
+
+    def resolve_driver_model(self, run_model_key: str) -> str:
+        """Pick the model used for host-control loops."""
+        if self.smart_mode and self.driver_model:
+            return self.driver_model
+        return run_model_key
 
     @property
     def dry_run(self) -> bool:

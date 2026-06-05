@@ -199,6 +199,54 @@ def _parse_launch_context(result: str) -> dict:
     return ctx
 
 
+def _auto_snapshot(
+    binary: str,
+    launch_ctx: dict,
+    config: Config,
+    logger: RunLogger,
+    run_id: str,
+    step_index: int,
+) -> Tuple[bool, str]:
+    """After launch_app, snapshot the target window without asking the LLM."""
+    if not launch_ctx.get("window_ids") or not launch_ctx.get("pid"):
+        return False, ""
+    args = {"pid": launch_ctx["pid"], "window_id": launch_ctx["window_ids"][0]}
+    shot = str(config.logs_dir / f"{run_id}_auto_snap.png")
+    ok, result = driver_call(binary, "get_window_state", args, config.step_timeout, screenshot_out=shot)
+    logger.log_event("auto_snapshot", {"ok": ok, "args": args, "chars": len(result)})
+    return ok, result
+
+
+def _smart_plan(
+    router: ModelRouter,
+    model_key: str,
+    task: str,
+    windows_snippet: str,
+    rules: str,
+    temperature: float,
+    logger: RunLogger,
+) -> str:
+    """One extra LLM call up front — produces a short plan so the driver model stays on track."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You plan macOS UI automation steps. Output a numbered list (max 8 steps). "
+                "Each step must be one concrete action: launch_app, get_window_state with "
+                "integer window_id, click element_index, type_text_in, or hotkey. "
+                "Never use null window_id. No scroll unless the task requires it."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Task: {task}\n\nKnown windows:\n{windows_snippet[:2000]}\n\n{rules}",
+        },
+    ]
+    c = router.complete(model_key, messages, temperature=temperature)
+    logger.log_event("smart_plan", {"ok": c.ok, "model": c.model, "text": (c.text or "")[:3000], "error": c.error})
+    return c.text if c.ok else ""
+
+
 def _launch_context_hint(ctx: dict) -> str:
     if not ctx.get("window_ids"):
         return (
@@ -261,20 +309,37 @@ def run_driver_task(
     tools = discover_tools(binary)
     logger.log_event("driver_ready", {"binary": binary, "tools": tools})
 
+    driver_model_key = config.resolve_driver_model(model_key)
     router = ModelRouter(config)
+    temp = config.driver_temperature if config.smart_mode else 0.1
     system = _SYSTEM_TEMPLATE.format(tools=", ".join(tools), rules=ruleset.system_prompt or "")
 
     # Seed context with the current windows.
     ok, windows = driver_call(binary, "list_windows", {}, config.step_timeout)
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": (
-            f"Goal: {task}\n\n"
-            f"Windows already listed (do NOT call list_windows again):\n{windows[:3500]}\n\n"
-            "First JSON step: launch_app if the target app is not open, else get_window_state "
-            "for ONE window, else click/type. Prefer acting over more observation."
-        )},
-    ]
+    user_intro = (
+        f"Goal: {task}\n\n"
+        f"Windows already listed (do NOT call list_windows again):\n{windows[:3500]}\n\n"
+        "First JSON step: launch_app if the target app is not open, else get_window_state "
+        "with integer pid AND window_id from launch_app, else click/type."
+    )
+    if config.smart_mode:
+        user_intro += (
+            f"\n\n[Smart mode: using model '{driver_model_key}', "
+            "higher quality, may be slower than local-small.]"
+        )
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user_intro}]
+
+    if config.smart_mode and config.plan_before_act:
+        plan = _smart_plan(
+            router, driver_model_key, task, windows, ruleset.system_prompt or "", temp, logger
+        )
+        if plan:
+            messages.append({
+                "role": "user",
+                "content": f"Follow this plan (adapt if the UI differs):\n{plan[:4000]}",
+            })
+    logger.log_event("driver_model", {"requested": model_key, "effective": driver_model_key,
+                                      "smart_mode": config.smart_mode})
 
     steps: List[Step] = []
     summary = ""
@@ -287,9 +352,9 @@ def run_driver_task(
     bad_window_state_count = 0
 
     for i in range(1, config.max_steps + 1):
-        completion = router.complete(model_key, messages, temperature=0.1)
+        completion = router.complete(driver_model_key, messages, temperature=temp)
         logger.log_event("model_response", {
-            "index": i, "model_key": model_key, "model": completion.model,
+            "index": i, "model_key": driver_model_key, "model": completion.model,
             "latency_s": completion.latency_s, "cost_usd": completion.cost_usd,
             "error": completion.error, "text": completion.text,
         })
@@ -342,6 +407,14 @@ def run_driver_task(
 
         # get_window_state requires a real window_id (from launch_app's Windows list).
         if tool == "get_window_state":
+            if launch_ctx.get("snapshot_done") and args.get("pid") == launch_ctx.get("pid"):
+                _skip_step(
+                    i, tool, args, "snapshot already taken",
+                    "UI tree was auto-captured after launch_app. Use click/type_text_in "
+                    "with element_index from that tree, or done.",
+                    steps, messages, completion.text, on_step, logger,
+                )
+                continue
             if not _valid_window_id(args.get("window_id")):
                 fixed = dict(args)
                 if launch_ctx.get("window_ids"):
@@ -414,6 +487,22 @@ def run_driver_task(
         if tool == "launch_app" and ok:
             launch_ctx = _parse_launch_context(result)
             logger.log_event("launch_context", launch_ctx)
+            if config.smart_mode and config.auto_snapshot_after_launch and launch_ctx.get("window_ids"):
+                s_ok, snap = _auto_snapshot(binary, launch_ctx, config, logger, run_id, i)
+                if s_ok and snap:
+                    launch_ctx["snapshot_done"] = True
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"Auto snapshot after launch (use these element_index values):\n"
+                            f"{snap[:6000]}\n\n"
+                            f"{_launch_context_hint(launch_ctx)} "
+                            "Next: click or type_text_in. Do NOT call get_window_state again "
+                            "unless the UI changed."
+                        ),
+                    })
+                    if on_step:
+                        on_step(Step(i, "auto_snapshot", Decision.ALLOW.value, "smart mode", True, snap[:200]))
         elif tool == "get_window_state" and ok:
             bad_window_state_count = 0
             bad_window_state_sig = None
@@ -448,4 +537,4 @@ def run_driver_task(
         summary = summary or f"reached max_steps ({config.max_steps}) without finishing"
 
     return RunResult(run_id, "completed", summary or "driver task finished",
-                     model_key, ruleset.name, steps)
+                     driver_model_key, ruleset.name, steps)

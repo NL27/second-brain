@@ -109,6 +109,9 @@ def doctor():
 
     table.add_row("Ollama host", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
     table.add_row("backend", cfg.control_backend)
+    table.add_row("smart_mode", str(cfg.smart_mode))
+    dm = cfg.driver_model or "(same as run model)"
+    table.add_row("driver_model", dm)
     table.add_row("dry_run", str(cfg.dry_run))
 
     env_file = cfg.root / ".env"
@@ -159,10 +162,22 @@ def run_task(
     rules: Optional[str] = typer.Option(None, "--rules", "-r", help="Rule set name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Auto-approve destructive actions."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan + log only; never execute."),
+    smart: bool = typer.Option(False, "--smart", help="Stronger model + plan + auto UI snapshot (slower)."),
+    fast: bool = typer.Option(False, "--fast", help="Fast/cheap: local-small, no smart extras."),
 ):
     """Run a single task end to end (gated + logged + versioned)."""
-    overrides = {"safety": {"dry_run": True}} if dry_run else None
-    cfg = load_config(overrides=overrides)
+    overrides: dict = {}
+    if dry_run:
+        overrides["safety"] = {"dry_run": True}
+    if fast:
+        overrides["control"] = {"smart_mode": False, "plan_before_act": False,
+                                "auto_snapshot_after_launch": False}
+        model = model or "local-small"
+    elif smart:
+        overrides["control"] = {"smart_mode": True, "driver_model": "local-general",
+                                "plan_before_act": True, "auto_snapshot_after_launch": True}
+        model = model or "local-general"
+    cfg = load_config(overrides=overrides or None)
     agent = Agent(cfg, confirmer=_make_confirmer(yes))
 
     def on_step(step):

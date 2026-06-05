@@ -67,21 +67,22 @@ models:
     vision: true
     notes: "Free GitHub Models (GITHUB_API_KEY = a GitHub token). You have an account."
 
-# Which model the agent uses by default for control tasks.
-default_model: local-small
+# Default model for CLI commands. Use local-small only on low-RAM machines (8GB).
+default_model: local-general
 
 # How the agent acts on the computer.
 control:
   # backend: driver | cua | none
-  #   driver -> control your REAL Mac via the Cua Driver CLI (host control).
-  #             We run the loop, so every action passes the approval gate first.
-  #   cua    -> cua-agent SDK driving a cua SANDBOX/VM (not your host).
-  #   none   -> plan-only (LLM produces a step plan, nothing is executed).
   backend: driver
-  # Max agent loop iterations per task.
+  # Smart mode: stronger model + planning + auto snapshot after launch (slower, fewer loops).
+  # Set smart_mode: false and default_model: local-small for fastest/cheapest on 8GB RAM.
+  smart_mode: true
+  driver_model: local-general
+  plan_before_act: true
+  auto_snapshot_after_launch: true
+  driver_temperature: 0.15
   max_steps: 40
-  # Seconds before a single tool action is abandoned.
-  step_timeout: 60
+  step_timeout: 90
 
 # Safety. See rules/ for the per-task rule files this references.
 safety:
