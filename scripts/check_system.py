@@ -99,7 +99,8 @@ def env_keys(root: Path) -> dict:
     """Read provider keys from the process env and a local .env (if present)."""
     keys = {}
     names = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY",
-             "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "DASHSCOPE_API_KEY"]
+             "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "DASHSCOPE_API_KEY",
+             "CURSOR_API_KEY"]
     env_file = root / ".env"
     file_vals = {}
     if env_file.exists():

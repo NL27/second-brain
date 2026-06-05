@@ -35,6 +35,12 @@ models:
     location: cloud
     vision: true
     notes: "Cloud alternative for eval comparisons."
+  cursor:
+    model: cursor/auto
+    location: cloud
+    vision: false
+    notes: "Uses your Cursor subscription via cursor-sdk (CURSOR_API_KEY).
+            Great for low-RAM machines; needs: pip install cursor-sdk."
 
 # Which model the agent uses by default for control tasks.
 default_model: local-vision
