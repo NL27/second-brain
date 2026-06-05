@@ -143,7 +143,7 @@ Never call get_window_state or list_windows more than twice in a row.
 
 Tool args:
 - launch_app: {{"bundle_id": "com.apple.Safari"}}
-- get_window_state: {{"pid": P, "window_id": W}}
+- get_window_state: {{"pid": P, "window_id": W}} — W is REQUIRED (integer from launch_app output, never null)
 - click: {{"pid": P, "window_id": W, "element_index": N}} or pixel {{"x": X, "y": Y}}
 - type_text_in: {{"pid": P, "window_id": W, "element_index": N, "text": "..."}}
 - hotkey: {{"pid": P, "keys": ["cmd", "q"]}}
@@ -178,6 +178,39 @@ def _extract_json(text: str) -> Optional[dict]:
 
 def _action_signature(tool: str, args: dict) -> str:
     return json.dumps({"tool": tool, "args": args}, sort_keys=True, default=str)
+
+
+def _valid_window_id(wid: object) -> bool:
+    if wid is None:
+        return False
+    s = str(wid).strip().lower()
+    return s not in ("", "none", "null")
+
+
+def _parse_launch_context(result: str) -> dict:
+    """Extract pid and window_ids from launch_app / driver text output."""
+    ctx: dict = {"pid": None, "window_ids": []}
+    for m in re.finditer(r"window_id[:\s\[]+(\d+)", result, re.IGNORECASE):
+        wid = int(m.group(1))
+        if wid not in ctx["window_ids"]:
+            ctx["window_ids"].append(wid)
+    for m in re.finditer(r"\bpid[:\s]+(\d+)", result, re.IGNORECASE):
+        ctx["pid"] = int(m.group(1))
+    return ctx
+
+
+def _launch_context_hint(ctx: dict) -> str:
+    if not ctx.get("window_ids"):
+        return (
+            "launch_app did not yield a window_id yet. Read the last launch_app result "
+            "and copy the numeric window_id from the Windows list."
+        )
+    pid = ctx.get("pid", "?")
+    wid = ctx["window_ids"][0]
+    return (
+        f"Use get_window_state with BOTH pid and window_id as integers, e.g. "
+        f'{{"pid": {pid}, "window_id": {wid}}}. window_id must NOT be null.'
+    )
 
 
 def _skip_step(
@@ -249,6 +282,9 @@ def run_driver_task(
     scroll_count = 0
     last_action_sig: Optional[str] = None
     action_count = 0
+    launch_ctx: dict = {"pid": None, "window_ids": []}
+    bad_window_state_sig: Optional[str] = None
+    bad_window_state_count = 0
 
     for i in range(1, config.max_steps + 1):
         completion = router.complete(model_key, messages, temperature=0.1)
@@ -304,6 +340,37 @@ def run_driver_task(
             )
             continue
 
+        # get_window_state requires a real window_id (from launch_app's Windows list).
+        if tool == "get_window_state":
+            if not _valid_window_id(args.get("window_id")):
+                fixed = dict(args)
+                if launch_ctx.get("window_ids"):
+                    fixed["window_id"] = launch_ctx["window_ids"][0]
+                    if launch_ctx.get("pid") and not fixed.get("pid"):
+                        fixed["pid"] = launch_ctx["pid"]
+                if _valid_window_id(fixed.get("window_id")):
+                    args = fixed
+                    sig = _action_signature(tool, args)
+                    logger.log_event("driver_autofix", {"tool": tool, "args": args})
+                else:
+                    bad_sig = _action_signature(tool, args)
+                    if bad_sig == bad_window_state_sig:
+                        bad_window_state_count += 1
+                    else:
+                        bad_window_state_sig = bad_sig
+                        bad_window_state_count = 1
+                    hint = _launch_context_hint(launch_ctx)
+                    if bad_window_state_count >= 2:
+                        hint += (
+                            " STOP retrying null window_id. Copy the integer from step 1 launch_app."
+                        )
+                    _skip_step(
+                        i, tool, args, "invalid window_id",
+                        hint,
+                        steps, messages, completion.text, on_step, logger,
+                    )
+                    continue
+
         # Cap scroll_in — models loop on it when confused.
         if tool == _SCROLL_TOOL:
             scroll_count += 1
@@ -343,6 +410,13 @@ def run_driver_task(
             on_step(step)
         logger.log_event("driver_result", {"index": i, "tool": tool, "ok": ok,
                                             "output": result[:4000], "screenshot": shot})
+
+        if tool == "launch_app" and ok:
+            launch_ctx = _parse_launch_context(result)
+            logger.log_event("launch_context", launch_ctx)
+        elif tool == "get_window_state" and ok:
+            bad_window_state_count = 0
+            bad_window_state_sig = None
 
         last_action_sig = sig
         if tool in _OBSERVE_TOOLS:

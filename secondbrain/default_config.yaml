@@ -68,7 +68,7 @@ models:
     notes: "Free GitHub Models (GITHUB_API_KEY = a GitHub token). You have an account."
 
 # Which model the agent uses by default for control tasks.
-default_model: local-small
+default_model: local-vision
 
 # How the agent acts on the computer.
 control:
