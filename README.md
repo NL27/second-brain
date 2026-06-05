@@ -94,22 +94,6 @@ open -n -g -a CuaDriver --args serve     # macOS
 
 and grant **both** `CuaDriver.app` and your terminal/IDE Accessibility + Screen Recording.
 
-## Using your Cursor subscription as the model brain
-
-Low-RAM machine? Instead of running a big local model, you can drive the agent
-with Cursor's cloud models via the Cursor SDK:
-
-```bash
-pip install cursor-sdk
-# put CURSOR_API_KEY=... in .env  (Cursor Dashboard -> Integrations)
-brain run-task "open Calculator and press 7" -m cursor
-```
-
-The `cursor` model (`cursor/auto`) routes through `cursor-sdk`. It fits the
-`driver` backend well because that loop reasons over the accessibility tree as
-text. Note: the Cursor SDK runs an agent per step, so it's a bit slower than a
-raw API key; for a snappier loop use a dedicated cloud key.
-
 ## Requirements
 
 - **Host control**: macOS 14+ (or Windows; Linux pre-release) with the **Cua Driver** installed, plus Python **3.9+** and liteLLM.

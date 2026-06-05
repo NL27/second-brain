@@ -25,15 +25,12 @@ control = ["cua-agent[all]>=0.4"]
 code = ["open-interpreter>=0.4"]
 # Web chat UI.
 ui = ["gradio>=4.0"]
-# Use your Cursor subscription's models as the agent brain.
-cursor = ["cursor-sdk>=0.1"]
 # Everything.
 all = [
     "litellm>=1.40",
     "cua-agent[all]>=0.4",
     "open-interpreter>=0.4",
     "gradio>=4.0",
-    "cursor-sdk>=0.1",
 ]
 
 [project.scripts]

@@ -29,18 +29,23 @@ models:
     model: anthropic/claude-sonnet-4-5
     location: cloud
     vision: true
-    notes: "Cloud frontier model; strong computer-use."
+    notes: "Cloud frontier model; strong computer-use (paid)."
   cloud-gpt:
     model: openai/gpt-4.1
     location: cloud
     vision: true
-    notes: "Cloud alternative for eval comparisons."
-  cursor:
-    model: cursor/auto
+    notes: "Cloud alternative for eval comparisons (paid)."
+  # --- FREE-tier friendly cloud models (no card needed) ---
+  cloud-gemini:
+    model: gemini/gemini-2.0-flash
+    location: cloud
+    vision: true
+    notes: "Free tier via Google AI Studio (GEMINI_API_KEY). Good default."
+  cloud-groq:
+    model: groq/llama-3.3-70b-versatile
     location: cloud
     vision: false
-    notes: "Uses your Cursor subscription via cursor-sdk (CURSOR_API_KEY).
-            Great for low-RAM machines; needs: pip install cursor-sdk."
+    notes: "Free, very fast (GROQ_API_KEY). Text-only; drives via AX tree."
 
 # Which model the agent uses by default for control tasks.
 default_model: local-vision

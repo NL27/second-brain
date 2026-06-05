@@ -32,7 +32,6 @@ _PROVIDER_ENV = {
     "deepseek": "DEEPSEEK_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "dashscope": "DASHSCOPE_API_KEY",
-    "cursor": "CURSOR_API_KEY",
 }
 
 
@@ -95,21 +94,6 @@ class ModelRouter:
     ) -> Completion:
         """Call a single registered model and normalize the response."""
         spec = self.config.model(model_key)
-
-        # Cursor SDK provider: use the Cursor subscription, bypassing liteLLM.
-        if _provider_of(spec.model) == "cursor":
-            from .provider_cursor import cursor_complete
-
-            model_id = spec.model.split("/", 1)[1] if "/" in spec.model else "auto"
-            start = time.time()
-            text, err = cursor_complete(model_id, messages)
-            return Completion(
-                model_key=model_key,
-                model=spec.model,
-                text=text or "",
-                latency_s=round(time.time() - start, 3),
-                error=err,
-            )
 
         if not _HAS_LITELLM:
             return Completion(
