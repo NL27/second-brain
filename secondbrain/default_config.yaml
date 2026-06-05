@@ -45,7 +45,12 @@ models:
     model: gemini/gemini-2.0-flash
     location: cloud
     vision: true
-    notes: "Free tier via Google AI Studio (GEMINI_API_KEY). Good default."
+    notes: "Free tier (GEMINI_API_KEY). May hit daily/RPM limits — try cloud-gemini-lite."
+  cloud-gemini-lite:
+    model: gemini/gemini-2.5-flash-lite
+    location: cloud
+    vision: true
+    notes: "Lighter Gemini; often separate free-tier quota from 2.0-flash."
   cloud-groq:
     model: groq/llama-3.3-70b-versatile
     location: cloud
