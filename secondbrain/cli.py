@@ -110,6 +110,20 @@ def doctor():
     table.add_row("Ollama host", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
     table.add_row("backend", cfg.control_backend)
     table.add_row("dry_run", str(cfg.dry_run))
+
+    env_file = cfg.root / ".env"
+    if env_file.exists():
+        table.add_row(".env file", f"[green]found[/] ({env_file})")
+    else:
+        table.add_row(".env file", f"[yellow]missing[/] — copy .env.example to .env in {cfg.root}")
+
+    gemini = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if gemini:
+        masked = gemini[:8] + "…" if len(gemini) > 8 else "(set)"
+        table.add_row("Gemini key", f"[green]loaded[/] {masked}")
+    else:
+        table.add_row("Gemini key", "[yellow]not in environment[/]")
+
     console.print(table)
 
 

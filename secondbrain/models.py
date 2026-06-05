@@ -59,15 +59,24 @@ def _provider_of(model: str) -> str:
     return model.split("/", 1)[0] if "/" in model else model
 
 
+def _api_key_for_provider(provider: str) -> Optional[str]:
+    """Return a non-empty API key for a provider, if configured."""
+    if provider == "gemini":
+        return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    env_var = _PROVIDER_ENV.get(provider)
+    if env_var is None:
+        return None
+    return os.getenv(env_var)
+
+
 def provider_available(model: str) -> bool:
     """Whether the prerequisites (key or local server) for a model are present."""
     provider = _provider_of(model)
     if provider == "ollama":
         return True  # Availability is checked at call time against the host.
-    env_var = _PROVIDER_ENV.get(provider)
-    if env_var is None:
+    if _PROVIDER_ENV.get(provider) is None:
         return True  # Unknown provider: assume the user knows what they configured.
-    return bool(os.getenv(env_var))
+    return bool(_api_key_for_provider(provider))
 
 
 class ModelRouter:

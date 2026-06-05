@@ -13,12 +13,23 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-try:  # Load .env if python-dotenv is present; harmless if not.
-    from dotenv import load_dotenv
-
-    load_dotenv()
+try:
+    from dotenv import load_dotenv as _load_dotenv
 except Exception:  # pragma: no cover - optional dependency
-    pass
+    _load_dotenv = None  # type: ignore
+
+
+def _load_env_file(root: Path) -> Optional[Path]:
+    """Load ``.env`` from the project root (not only the current working directory)."""
+    if _load_dotenv is None:
+        return None
+    env_path = root / ".env"
+    if env_path.exists():
+        _load_dotenv(dotenv_path=env_path, override=False)
+        return env_path
+    # Fallback: walk up from cwd (helps if brain is run from a subdirectory).
+    _load_dotenv(override=False)
+    return None
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _DEFAULT_CONFIG_PATH = _PACKAGE_DIR / "default_config.yaml"
@@ -125,6 +136,7 @@ def load_config(
 ) -> Config:
     """Build a :class:`Config` by merging defaults, project file, env, overrides."""
     root = Path(root or os.getcwd()).resolve()
+    _load_env_file(root)
 
     with open(_DEFAULT_CONFIG_PATH, "r", encoding="utf-8") as fh:
         merged: Dict[str, Any] = yaml.safe_load(fh) or {}
