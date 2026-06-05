@@ -115,6 +115,12 @@ def driver_call(binary: str, tool: str, args: dict, timeout: int,
         return False, str(exc)
 
 
+# Tools that only gather state — the model often loops on these unless nudged.
+_OBSERVE_TOOLS = frozenset({"list_windows", "get_window_state", "screenshot"})
+_ACTION_TOOLS = (
+    "launch_app, click, type_text_in, type_text, scroll_in, hotkey"
+)
+
 _SYSTEM_TEMPLATE = """You control a macOS computer through the Cua Driver.
 Work one step at a time. On each turn, respond with ONLY a single JSON object,
 no prose, in one of these forms:
@@ -124,14 +130,24 @@ no prose, in one of these forms:
 
 Available tools: {tools}
 
-Cua Driver conventions:
-- Always call get_window_state for a (pid, window_id) BEFORE clicking/typing in
-  it; element_index values come from that snapshot and go stale every turn.
-- launch_app takes {{"bundle_id": "com.apple.Safari"}} (idempotent; returns pid
-  + windows). list_windows enumerates current windows.
-- click takes {{"pid":P,"window_id":W,"element_index":N}} or pixel {{"x":..,"y":..}}.
-- hotkey takes {{"pid":P,"keys":["cmd","q"]}}.
-Stop with "done" as soon as the goal is met. Keep args minimal and valid JSON.
+Important workflow (do NOT skip actions):
+1. The run ALREADY started with list_windows — do NOT call list_windows again.
+2. If the target app is not open: launch_app with bundle_id (e.g. com.apple.calculator).
+3. Call get_window_state ONCE for that app's (pid, window_id) to get element_index numbers.
+4. Then IMMEDIATELY act: click, type_text_in, scroll_in, or hotkey. Do not snapshot again
+   unless the UI changed after your last action.
+5. After each action, one get_window_state is enough to verify — then act again or done.
+
+Never call get_window_state or list_windows more than twice in a row. Prefer acting.
+
+Tool args:
+- launch_app: {{"bundle_id": "com.apple.Safari"}}
+- get_window_state: {{"pid": P, "window_id": W}}
+- click: {{"pid": P, "window_id": W, "element_index": N}} or pixel {{"x": X, "y": Y}}
+- type_text_in: {{"pid": P, "window_id": W, "element_index": N, "text": "..."}}
+- hotkey: {{"pid": P, "keys": ["cmd", "q"]}}
+
+Stop with "done" when the goal is met. Keep args minimal and valid JSON.
 
 {rules}
 """
@@ -192,12 +208,19 @@ def run_driver_task(
     ok, windows = driver_call(binary, "list_windows", {}, config.step_timeout)
     messages = [
         {"role": "system", "content": system},
-        {"role": "user", "content": f"Goal: {task}\n\nCurrent windows:\n{windows[:4000]}\n\n"
-         "Decide the next single action as JSON."},
+        {"role": "user", "content": (
+            f"Goal: {task}\n\n"
+            f"Windows already listed (do NOT call list_windows again):\n{windows[:3500]}\n\n"
+            "First JSON step: launch_app if the target app is not open, else get_window_state "
+            "for ONE window, else click/type. Prefer acting over more observation."
+        )},
     ]
 
     steps: List[Step] = []
     summary = ""
+    consecutive_observe = 0
+    list_windows_used = True  # we already called it when seeding context
+
     for i in range(1, config.max_steps + 1):
         completion = router.complete(model_key, messages, temperature=0.1)
         logger.log_event("model_response", {
@@ -228,6 +251,24 @@ def run_driver_task(
             break
 
         args = decision_obj.get("args", {}) or {}
+
+        # Block redundant list_windows (already provided at run start).
+        if tool == "list_windows":
+            consecutive_observe += 1
+            step = Step(i, "list_windows (skipped)", Decision.ALLOW.value,
+                        "already have window list from run start", False,
+                        output="Skipped: windows were listed at startup. Use launch_app or get_window_state for one target window, then click/type.")
+            steps.append(step)
+            if on_step:
+                on_step(step)
+            logger.log_event("driver_skip", {"tool": tool, "reason": "duplicate list_windows"})
+            messages.append({"role": "assistant", "content": completion.text})
+            messages.append({"role": "user", "content":
+                "list_windows was already run at start. Do NOT call it again. "
+                f"Next: launch_app if needed, then ONE get_window_state, then an ACTION "
+                f"({ _ACTION_TOOLS }). Reply with JSON only."})
+            continue
+
         action = Action(tool=tool, description=thought or f"{tool} {args}", args=args)
         verdict = gate.check(action)
         logger.log_event("action_gate", {
@@ -256,10 +297,24 @@ def run_driver_task(
         logger.log_event("driver_result", {"index": i, "tool": tool, "ok": ok,
                                             "output": result[:4000], "screenshot": shot})
 
+        if tool in _OBSERVE_TOOLS:
+            consecutive_observe += 1
+        else:
+            consecutive_observe = 0
+
         messages.append({"role": "assistant", "content": completion.text})
-        messages.append({"role": "user", "content":
-                         f"Result of {tool} (ok={ok}):\n{result[:4000]}\n\n"
-                         "Next action as JSON, or done."})
+        follow = (
+            f"Result of {tool} (ok={ok}):\n{result[:4000]}\n\n"
+            "Next action as JSON, or done."
+        )
+        if consecutive_observe >= 2:
+            follow = (
+                f"Result of {tool} (ok={ok}):\n{result[:2500]}\n\n"
+                "STOP re-reading the UI. You already have enough state. "
+                f"Your NEXT step MUST be an action tool ({_ACTION_TOOLS}) or done — "
+                "NOT list_windows or another get_window_state unless you just changed the UI."
+            )
+        messages.append({"role": "user", "content": follow})
     else:
         summary = summary or f"reached max_steps ({config.max_steps}) without finishing"
 
