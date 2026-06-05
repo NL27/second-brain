@@ -1,0 +1,34 @@
+# Hardcoded: open Safari and go to Google (keyboard shortcuts — no LLM).
+# Run: brain recipe run safari-google
+#
+# If typing fails, run once with smart mode to find the address bar element_index,
+# then add it under type_text_in below.
+name: safari-google
+description: Open Safari, Cmd+L, type google.com, Return
+
+steps:
+  - tool: launch_app
+    args:
+      bundle_id: com.apple.Safari
+    description: Open Safari
+
+  - wait_seconds: 1.5
+
+  - tool: hotkey
+    use_launch_context: true
+    args:
+      keys: ["cmd", "l"]
+    description: Focus address bar (Cmd+L)
+
+  - tool: type_text_in
+    use_launch_context: true
+    args:
+      text: "https://google.com"
+      element_index: 0
+    description: Type URL in focused field (tune element_index if needed)
+
+  - tool: hotkey
+    use_launch_context: true
+    args:
+      keys: ["return"]
+    description: Navigate

@@ -1,0 +1,26 @@
+# Hardcoded: open Calculator and press 7.
+# Run: brain recipe run calculator-seven
+name: calculator-seven
+description: Launch Calculator and click the Seven button
+
+steps:
+  - tool: launch_app
+    args:
+      bundle_id: com.apple.calculator
+    description: Open Calculator
+
+  - wait_seconds: 0.8
+
+  # After launch, smart snapshot in code may run if auto_snapshot is on in config.
+  # Find "Seven" in the auto snapshot log, then set element_index here:
+  - tool: get_window_state
+    use_launch_context: true
+    args: {}
+    description: Snapshot UI to locate buttons (check logs for [N] Seven)
+
+  # Default index — change after one get_window_state if wrong on your Mac:
+  - tool: click
+    use_launch_context: true
+    args:
+      element_index: 9
+    description: Click Seven (adjust element_index from snapshot if needed)

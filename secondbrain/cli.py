@@ -7,6 +7,8 @@ Commands:
   brain chat                Interactive text chat / task loop.
   brain eval "..."          Compare models on the same task.
   brain runs                Show recent versioned runs.
+  brain recipe list         List hardcoded YAML recipes (no LLM).
+  brain recipe run <name>   Run a hardcoded recipe (reliable, fast).
   brain ui                  Launch the optional Gradio chat UI.
 """
 
@@ -26,9 +28,12 @@ from .core import Agent
 from .eval import run_eval
 from .logging import list_runs
 from .models import ModelRouter, provider_available
-from .rules import Decision, GateResult
+from .recipes import list_recipes, run_recipe
+from .rules import ApprovalGate, Decision, GateResult, load_ruleset
 
 app = typer.Typer(add_completion=False, help="Second Brain - personal computer-control agent.")
+recipe_app = typer.Typer(help="Hardcoded tasks — no LLM, fixed steps in recipes/*.yaml")
+app.add_typer(recipe_app, name="recipe")
 console = Console()
 
 
@@ -189,6 +194,46 @@ def run_task(
     console.print(Panel(result.summary, title=f"Result ({result.status})",
                         border_style="green" if result.status == "completed" else "red"))
     console.print(f"[dim]run {result.run_id} - logged & versioned under logs/[/]")
+
+
+@recipe_app.command("list")
+def recipe_list():
+    """List available hardcoded recipes."""
+    cfg = load_config()
+    table = Table(title="Recipes (recipes/*.yaml)")
+    table.add_column("Name")
+    table.add_column("Description")
+    for r in list_recipes(cfg):
+        table.add_row(r.name, r.description)
+    console.print(table)
+    console.print("\nRun: [bold]brain recipe run <name>[/]")
+
+
+@recipe_app.command("run")
+def recipe_run_cmd(
+    name: str = typer.Argument(..., help="Recipe file name without .yaml (e.g. safari-google)."),
+    rules: Optional[str] = typer.Option(None, "--rules", "-r"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+):
+    """Run a hardcoded recipe — same driver, no LLM, fully logged."""
+    cfg = load_config()
+    ruleset = load_ruleset(cfg, rules)
+    gate = ApprovalGate(ruleset, _make_confirmer(yes))
+
+    def on_step(step):
+        color = {"allow": "green", "confirm": "yellow", "deny": "red"}.get(step.decision, "white")
+        console.print(f"  [dim]{step.index:>2}[/] [{color}]{step.decision:<7}[/] {step.description}")
+
+    try:
+        recipe = next((r for r in list_recipes(cfg) if r.name == name), None)
+        title = recipe.description if recipe else name
+    except Exception:
+        title = name
+    console.print(Panel(title, title=f"Recipe: {name}", border_style="cyan"))
+    result = run_recipe(cfg, name, rules_name=rules, gate=gate, on_step=on_step)
+    console.print(Panel(result.summary, title=f"Result ({result.status})",
+                        border_style="green" if result.status == "completed" else "red"))
+    console.print(f"[dim]run {result.run_id} - logged under logs/[/]")
 
 
 @app.command()
