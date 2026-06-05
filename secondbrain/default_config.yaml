@@ -25,6 +25,11 @@ models:
     location: local
     vision: false
     notes: "Local general reasoning model."
+  local-small:
+    model: ollama/llama3.2:3b
+    location: local
+    vision: false
+    notes: "Tiny local model (~2GB) for low-RAM machines. No key needed."
   cloud-claude:
     model: anthropic/claude-sonnet-4-5
     location: cloud
