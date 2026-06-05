@@ -32,6 +32,8 @@ _PROVIDER_ENV = {
     "deepseek": "DEEPSEEK_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "dashscope": "DASHSCOPE_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "github": "GITHUB_API_KEY",
 }
 
 

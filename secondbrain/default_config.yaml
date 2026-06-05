@@ -51,6 +51,16 @@ models:
     location: cloud
     vision: false
     notes: "Free, very fast (GROQ_API_KEY). Text-only; drives via AX tree."
+  cloud-openrouter:
+    model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+    location: cloud
+    vision: false
+    notes: "Free via OpenRouter (OPENROUTER_API_KEY). Swap model for any :free one."
+  cloud-github:
+    model: github/gpt-4o-mini
+    location: cloud
+    vision: true
+    notes: "Free GitHub Models (GITHUB_API_KEY = a GitHub token). You have an account."
 
 # Which model the agent uses by default for control tasks.
 default_model: local-vision
