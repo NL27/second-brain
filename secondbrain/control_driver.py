@@ -117,9 +117,9 @@ def driver_call(binary: str, tool: str, args: dict, timeout: int,
 
 # Tools that only gather state — the model often loops on these unless nudged.
 _OBSERVE_TOOLS = frozenset({"list_windows", "get_window_state", "screenshot"})
-_ACTION_TOOLS = (
-    "launch_app, click, type_text_in, type_text, scroll_in, hotkey"
-)
+# scroll_in is valid but models spam it when stuck — cap unless the task needs it.
+_SCROLL_TOOL = "scroll_in"
+_ACTION_TOOLS = "launch_app, click, type_text_in, type_text, hotkey"
 
 _SYSTEM_TEMPLATE = """You control a macOS computer through the Cua Driver.
 Work one step at a time. On each turn, respond with ONLY a single JSON object,
@@ -134,11 +134,12 @@ Important workflow (do NOT skip actions):
 1. The run ALREADY started with list_windows — do NOT call list_windows again.
 2. If the target app is not open: launch_app with bundle_id (e.g. com.apple.calculator).
 3. Call get_window_state ONCE for that app's (pid, window_id) to get element_index numbers.
-4. Then IMMEDIATELY act: click, type_text_in, scroll_in, or hotkey. Do not snapshot again
-   unless the UI changed after your last action.
-5. After each action, one get_window_state is enough to verify — then act again or done.
+4. Then IMMEDIATELY act: click or type_text_in on the correct AXButton (not the display).
+5. Do NOT use scroll_in unless the user explicitly asked to scroll. Calculator/apps rarely need it.
+6. If the goal is already done after a click/type, respond with done — do not repeat the same action.
+7. Never repeat the exact same tool+args twice. Never call list_windows again.
 
-Never call get_window_state or list_windows more than twice in a row. Prefer acting.
+Never call get_window_state or list_windows more than twice in a row.
 
 Tool args:
 - launch_app: {{"bundle_id": "com.apple.Safari"}}
@@ -173,6 +174,32 @@ def _extract_json(text: str) -> Optional[dict]:
                 except Exception:
                     return None
     return None
+
+
+def _action_signature(tool: str, args: dict) -> str:
+    return json.dumps({"tool": tool, "args": args}, sort_keys=True, default=str)
+
+
+def _skip_step(
+    i: int,
+    tool: str,
+    args: dict,
+    reason: str,
+    hint: str,
+    steps: List[Step],
+    messages: list,
+    completion_text: str,
+    on_step: Optional[Callable[[Step], None]],
+    logger: RunLogger,
+) -> None:
+    """Record a skipped step and nudge the model without calling the driver."""
+    step = Step(i, f"{tool} {args} (skipped)", Decision.ALLOW.value, reason, False, output=hint)
+    steps.append(step)
+    if on_step:
+        on_step(step)
+    logger.log_event("driver_skip", {"tool": tool, "args": args, "reason": reason})
+    messages.append({"role": "assistant", "content": completion_text})
+    messages.append({"role": "user", "content": hint + " Reply with JSON only."})
 
 
 def run_driver_task(
@@ -219,7 +246,9 @@ def run_driver_task(
     steps: List[Step] = []
     summary = ""
     consecutive_observe = 0
-    list_windows_used = True  # we already called it when seeding context
+    scroll_count = 0
+    last_action_sig: Optional[str] = None
+    action_count = 0
 
     for i in range(1, config.max_steps + 1):
         completion = router.complete(model_key, messages, temperature=0.1)
@@ -251,23 +280,41 @@ def run_driver_task(
             break
 
         args = decision_obj.get("args", {}) or {}
+        sig = _action_signature(tool, args)
+        task_needs_scroll = "scroll" in task.lower()
 
         # Block redundant list_windows (already provided at run start).
         if tool == "list_windows":
             consecutive_observe += 1
-            step = Step(i, "list_windows (skipped)", Decision.ALLOW.value,
-                        "already have window list from run start", False,
-                        output="Skipped: windows were listed at startup. Use launch_app or get_window_state for one target window, then click/type.")
-            steps.append(step)
-            if on_step:
-                on_step(step)
-            logger.log_event("driver_skip", {"tool": tool, "reason": "duplicate list_windows"})
-            messages.append({"role": "assistant", "content": completion.text})
-            messages.append({"role": "user", "content":
+            _skip_step(
+                i, tool, args, "duplicate list_windows",
                 "list_windows was already run at start. Do NOT call it again. "
-                f"Next: launch_app if needed, then ONE get_window_state, then an ACTION "
-                f"({ _ACTION_TOOLS }). Reply with JSON only."})
+                f"Next: launch_app if needed, one get_window_state, then {_ACTION_TOOLS}, or done.",
+                steps, messages, completion.text, on_step, logger,
+            )
             continue
+
+        # Block exact duplicate actions (e.g. type '7' three times).
+        if sig == last_action_sig:
+            _skip_step(
+                i, tool, args, "duplicate action",
+                f"You already ran {tool} with the same args. Try a DIFFERENT element_index, "
+                "another tool, or {{\"tool\":\"done\",\"summary\":\"...\"}} if the goal is met.",
+                steps, messages, completion.text, on_step, logger,
+            )
+            continue
+
+        # Cap scroll_in — models loop on it when confused.
+        if tool == _SCROLL_TOOL:
+            scroll_count += 1
+            if scroll_count > 1 or (scroll_count == 1 and not task_needs_scroll):
+                _skip_step(
+                    i, tool, args, "scroll not needed",
+                    "Do NOT scroll unless the user asked. Use click on the right AXButton "
+                    f"(Calculator: click button labels, not the display), or done.",
+                    steps, messages, completion.text, on_step, logger,
+                )
+                continue
 
         action = Action(tool=tool, description=thought or f"{tool} {args}", args=args)
         verdict = gate.check(action)
@@ -297,22 +344,30 @@ def run_driver_task(
         logger.log_event("driver_result", {"index": i, "tool": tool, "ok": ok,
                                             "output": result[:4000], "screenshot": shot})
 
+        last_action_sig = sig
         if tool in _OBSERVE_TOOLS:
             consecutive_observe += 1
         else:
             consecutive_observe = 0
+        if tool not in _OBSERVE_TOOLS and tool != "done":
+            action_count += 1
 
         messages.append({"role": "assistant", "content": completion.text})
         follow = (
             f"Result of {tool} (ok={ok}):\n{result[:4000]}\n\n"
-            "Next action as JSON, or done."
+            "Next action as JSON, or done if the goal is already satisfied."
         )
         if consecutive_observe >= 2:
             follow = (
                 f"Result of {tool} (ok={ok}):\n{result[:2500]}\n\n"
-                "STOP re-reading the UI. You already have enough state. "
-                f"Your NEXT step MUST be an action tool ({_ACTION_TOOLS}) or done — "
-                "NOT list_windows or another get_window_state unless you just changed the UI."
+                "STOP re-reading the UI. "
+                f"Next MUST be {_ACTION_TOOLS}, or done — not list_windows/get_window_state."
+            )
+        elif action_count >= 3 and tool in ("click", "type_text_in", "type_text"):
+            follow = (
+                f"Result of {tool} (ok={ok}):\n{result[:2500]}\n\n"
+                "If the user's goal is met, respond with done NOW. "
+                "Do not repeat clicks/types or scroll."
             )
         messages.append({"role": "user", "content": follow})
     else:
