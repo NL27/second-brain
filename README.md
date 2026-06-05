@@ -6,7 +6,7 @@ This is the protected foundation. Later phases (knowledge base, scheduling, mess
 
 ## What it does today (Phase 1)
 
-- **Host control with guardrails** — drives your actual desktop apps via `cua-agent` + the **Cua Driver** (background; does not steal your cursor or focus). Every proposed action passes through an **approval gate** first.
+- **Host control with guardrails** — drives your actual desktop apps via the **Cua Driver** (background; does not steal your cursor or focus). Second Brain runs the action loop itself over the `cua-driver` CLI, so every proposed click/keystroke passes through an **approval gate** before it executes.
 - **Multi-LLM routing + evaluation** — one interface to local (Ollama) and cloud (Claude/GPT/Groq/DeepSeek/Qwen/Gemini) models via liteLLM. Run the *same task across models* and rank them.
 - **Per-task rules** — YAML rule files define instructions, allow/deny lists, and what counts as destructive. Fork bombs and credential paths are hard-blocked; deletes/sends/`sudo` require confirmation.
 - **Everything logged + versioned** — each run is a JSONL trajectory, indexed in SQLite, and **auto-committed to git** so any run can be replayed and understood afterward.
@@ -39,10 +39,11 @@ pip install -e .
 brain doctor
 brain run-task "open Notes and write a hello note" --dry-run
 
-# Full host control + local models (macOS, Python >= 3.11)
-bash scripts/setup.sh                  # runs the system check, then installs what's right for this box
-# then grant Accessibility + Screen Recording to your terminal/IDE
-brain doctor
+# Full host control + local models (macOS, Python 3.9+)
+bash scripts/setup.sh                  # runs the system check, installs the Cua Driver + deps
+# then grant Accessibility + Screen Recording to BOTH CuaDriver.app and your terminal/IDE
+brain doctor                           # "Cua Driver (host control)" should be ok
+brain run-task "open Calculator and press 7"
 ```
 
 ### Running on a different machine
@@ -77,16 +78,34 @@ brain ui                             # optional Gradio chat UI
 - Destructive actions (deletes, `sudo`, sends, payments, installs) require **explicit confirmation**; a deny-list hard-blocks the truly dangerous.
 - Actions are **logged before execution** and git-committed, so every run is auditable and replayable. Set `--dry-run` (or `safety.dry_run: true`) for plan-only.
 
+## Control backends
+
+Set `control.backend` in `config.yaml`:
+
+- `driver` (default) — host control of your **real Mac** via the **Cua Driver** CLI. Second Brain runs the gated loop. Works on **Python 3.9+**. Needs the `cua-driver` binary + liteLLM + a model.
+- `cua` — the **cua-agent SDK** driving a cua **sandbox/VM** (not your host). Needs **Python 3.11+** and `pip install 'cua-agent[all]'`.
+- `none` — plan-only (no execution). Cross-platform, no extra deps.
+
+For the `driver` backend, start the daemon once so macOS attributes permissions to the app bundle:
+
+```bash
+open -n -g -a CuaDriver --args serve     # macOS
+```
+
+and grant **both** `CuaDriver.app` and your terminal/IDE Accessibility + Screen Recording.
+
 ## Requirements
 
-- macOS on Apple Silicon (host control). Plan-only mode is cross-platform.
-- Python >= 3.11 for `cua` host control (>= 3.9 for plan-only / eval).
+- **Host control**: macOS 14+ (or Windows; Linux pre-release) with the **Cua Driver** installed, plus Python **3.9+** and liteLLM.
+- **Plan-only / eval**: any OS, Python 3.9+.
+- **Optional** `cua` sandbox backend: Python 3.11+ and `cua-agent`.
 - Optional: Ollama for local models; cloud API keys for cloud models.
 
 ## Project layout
 
 - `secondbrain/` — the core package (config, models, rules, logging, core, eval, cli).
-- `secondbrain/control_cua.py` — the single seam to `cua` host control.
+- `secondbrain/control_driver.py` — host control loop over the Cua Driver CLI (the `driver` backend).
+- `secondbrain/control_cua.py` — the `cua` sandbox/VM backend (cua-agent SDK).
 - `rules/` — per-task policy files.
 - `mcp/servers.json` — MCP server registry (the extensibility backbone).
 - `logs/` — versioned run trajectories.

@@ -40,15 +40,25 @@ pip install -q --upgrade pip
 say "Installing Second Brain + multi-LLM routing (litellm)..."
 pip install -q -e ".[llm]"
 
-# 4. cua host control (only on 3.11+) ----------------------------------------
+# 4. Host control via the Cua Driver (works on Python 3.9+) ------------------
+say "Installing the Cua Driver (drives your real Mac in the background)..."
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh)" \
+  || warn "Cua Driver install skipped/failed. See https://cua.ai/docs/cua-driver"
+
+if command -v cua-driver >/dev/null 2>&1 || [ -x "$HOME/.local/bin/cua-driver" ]; then
+  DRIVER="$(command -v cua-driver || echo "$HOME/.local/bin/cua-driver")"
+  say "Configuring Cua Driver capture mode (som = AX tree + screenshot)..."
+  "$DRIVER" config set capture_mode som || true
+  say "Starting the Cua Driver daemon..."
+  open -n -g -a CuaDriver --args serve 2>/dev/null || "$DRIVER" serve >/dev/null 2>&1 &
+fi
+
+# 4b. Optional: cua-agent SDK (sandbox/VM backend) - only needs/uses 3.11+ ----
 if [ "$(printf '%s\n3.11\n' "$PYV" | sort -V | head -1)" = "3.11" ]; then
-  say "Installing cua-agent (host control). This pulls a few packages..."
-  pip install -q "cua-agent[all]" || warn "cua-agent install failed; staying plan-only."
-  say "Installing the Cua Driver (background host control, no cursor-steal)..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh)" \
-    || warn "Cua Driver install skipped/failed. See https://github.com/trycua/cua"
+  say "Installing optional cua-agent SDK (sandbox backend)..."
+  pip install -q "cua-agent[all]" || warn "cua-agent SDK install failed (optional; host control unaffected)."
 else
-  warn "Skipping cua-agent (needs Python >= 3.11)."
+  warn "Skipping optional cua-agent SDK (needs Python >= 3.11). Host control via the Cua Driver still works."
 fi
 
 # 5. Ollama + local models ----------------------------------------------------
@@ -62,8 +72,8 @@ else
 fi
 
 say "Done. Next:"
-echo "  1) Grant Terminal/IDE: System Settings > Privacy & Security >"
-echo "     Accessibility AND Screen Recording."
+echo "  1) Grant BOTH CuaDriver.app AND your terminal/IDE:"
+echo "     System Settings > Privacy & Security > Accessibility AND Screen Recording."
 echo "  2) source .venv/bin/activate"
-echo "  3) brain doctor      # verify everything is green"
-echo "  4) brain run-task \"open Notes and write 'hello'\" --dry-run"
+echo "  3) brain doctor      # Cua Driver should show ok (daemon running)"
+echo "  4) brain run-task \"open the Calculator and press 7\""

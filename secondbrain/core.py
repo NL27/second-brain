@@ -83,7 +83,11 @@ class Agent:
 
         try:
             backend = self.config.control_backend
-            if backend == "cua" and not self.config.dry_run:
+            if self.config.dry_run or backend == "none":
+                result = self._run_plan_only(task, model_key, ruleset, gate, logger, on_step)
+            elif backend == "driver":
+                result = self._run_driver(task, model_key, ruleset, gate, logger, on_step)
+            elif backend == "cua":
                 result = self._run_cua(task, model_key, ruleset, gate, logger, on_step)
             else:
                 result = self._run_plan_only(task, model_key, ruleset, gate, logger, on_step)
@@ -161,6 +165,31 @@ class Agent:
         )
         return RunResult(run_id, "completed", summary, model_key, ruleset.name, steps)
 
+    def _run_driver(
+        self,
+        task: str,
+        model_key: str,
+        ruleset: RuleSet,
+        gate: ApprovalGate,
+        logger: RunLogger,
+        on_step: Optional[Callable[[Step], None]],
+    ) -> RunResult:
+        """Drive the real Mac via the Cua Driver CLI, gating every action.
+
+        Falls back to plan-only (logged) if the driver is unavailable.
+        """
+        try:
+            from .control_driver import run_driver_task
+        except Exception as exc:
+            logger.log_event("backend_unavailable", {"backend": "driver", "message": str(exc)})
+            return self._run_plan_only(task, model_key, ruleset, gate, logger, on_step)
+        try:
+            return run_driver_task(self.config, task, model_key, ruleset, gate, logger, on_step)
+        except Exception as exc:
+            logger.log_event("backend_error", {"backend": "driver", "message": str(exc)})
+            logger.log_event("backend_fallback", {"to": "plan_only"})
+            return self._run_plan_only(task, model_key, ruleset, gate, logger, on_step)
+
     def _run_cua(
         self,
         task: str,
@@ -170,7 +199,7 @@ class Agent:
         logger: RunLogger,
         on_step: Optional[Callable[[Step], None]],
     ) -> RunResult:
-        """Drive the real Mac via cua-agent, gating every action.
+        """Drive a cua sandbox/VM via cua-agent, gating every action.
 
         Best-effort integration: if cua-agent (and the Cua Driver) are not
         installed, we log the reason and fall back to plan-only so the run

@@ -41,10 +41,12 @@ default_model: local-vision
 
 # How the agent acts on the computer.
 control:
-  # backend: cua | none
-  #   cua  -> use cua-agent + Cua Driver for background host control
-  #   none -> plan-only mode (LLM produces a step plan, nothing is executed)
-  backend: cua
+  # backend: driver | cua | none
+  #   driver -> control your REAL Mac via the Cua Driver CLI (host control).
+  #             We run the loop, so every action passes the approval gate first.
+  #   cua    -> cua-agent SDK driving a cua SANDBOX/VM (not your host).
+  #   none   -> plan-only (LLM produces a step plan, nothing is executed).
+  backend: driver
   # Max agent loop iterations per task.
   max_steps: 40
   # Seconds before a single tool action is abandoned.

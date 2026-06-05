@@ -75,8 +75,8 @@ def doctor():
 
     py_ok = sys.version_info >= (3, 9)
     table.add_row("Python >= 3.9", "[green]ok[/]" if py_ok else "[red]too old[/]")
-    table.add_row("Python >= 3.11 (for cua host control)",
-                  "[green]ok[/]" if sys.version_info >= (3, 11) else "[yellow]plan-only only[/]")
+    table.add_row("Python >= 3.11 (optional cua-agent SDK only)",
+                  "[green]ok[/]" if sys.version_info >= (3, 11) else "[yellow]n/a (driver host control works on 3.9+)[/]")
 
     for mod in ("yaml", "dotenv", "litellm"):
         try:
@@ -85,12 +85,27 @@ def doctor():
         except Exception:
             table.add_row(f"import {mod}", "[yellow]missing[/]")
 
+    # Host control = the Cua Driver (drives your real Mac). This is what
+    # backend=driver uses.
+    try:
+        from .control_driver import driver_bin, daemon_running
+        b = driver_bin()
+        if b:
+            running = daemon_running(b)
+            table.add_row("Cua Driver (host control)",
+                          "[green]ok[/]" + ("" if running else " [yellow](daemon not running)[/]"))
+        else:
+            table.add_row("Cua Driver (host control)", "[yellow]not installed[/]")
+    except Exception as exc:
+        table.add_row("Cua Driver (host control)", f"[yellow]error: {exc}[/]")
+
+    # The cua-agent SDK is the separate sandbox/VM backend (backend=cua).
     try:
         from .control_cua import _import_cua
         _import_cua()
-        table.add_row("cua-agent (host control)", "[green]ok[/]")
+        table.add_row("cua-agent SDK (sandbox)", "[green]ok[/]")
     except Exception:
-        table.add_row("cua-agent (host control)", "[yellow]not installed[/]")
+        table.add_row("cua-agent SDK (sandbox)", "[yellow]not installed[/]")
 
     table.add_row("Ollama host", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
     table.add_row("backend", cfg.control_backend)

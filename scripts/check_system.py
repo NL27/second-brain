@@ -77,7 +77,12 @@ def is_apple_silicon() -> bool:
 
 
 def have(cmd: str) -> bool:
-    return shutil.which(cmd) is not None
+    if shutil.which(cmd):
+        return True
+    # The Cua Driver symlinks here even when ~/.local/bin isn't on PATH.
+    if cmd == "cua-driver" and (Path.home() / ".local" / "bin" / "cua-driver").exists():
+        return True
+    return False
 
 
 def ollama_running(host: str) -> bool:
@@ -137,19 +142,22 @@ def gather(root: Path) -> dict:
         "cpu_count": os.cpu_count() or 0,
         "ram_gb": total_ram_gb(),
         "tools": {t: have(t) for t in ("git", "python3", "pip3", "ollama",
-                                       "brew", "node", "npx", "curl", "docker")},
+                                       "brew", "node", "npx", "curl", "docker",
+                                       "cua-driver")},
         "ollama_host": host,
         "ollama_running": ollama_running(host),
         "keys": env_keys(root),
     }
 
-    # Capability verdicts.
-    if info["os"] == "Darwin" and info["apple_silicon"] and info["python_ok_control"]:
-        info["host_control"] = "supported"
-    elif info["os"] == "Darwin" and info["apple_silicon"]:
-        info["host_control"] = "needs Python >= 3.11"
-    elif info["os"] in ("Linux", "Windows"):
-        info["host_control"] = "sandbox/VM path (cua), host driver is macOS-only"
+    # Capability verdicts. Host control = the Cua Driver (CLI). It works on
+    # Python 3.9+ (we shell out to the driver and run the loop via liteLLM).
+    # Python 3.11 is only needed for the separate cua-agent SDK (sandbox).
+    has_driver = info["tools"]["cua-driver"]
+    if info["os"] in ("Darwin", "Windows"):
+        info["host_control"] = "supported (Cua Driver)" if has_driver else "install Cua Driver"
+    elif info["os"] == "Linux":
+        info["host_control"] = ("supported (Cua Driver, pre-release)" if has_driver
+                                else "install Cua Driver (Linux pre-release)")
     else:
         info["host_control"] = "plan-only"
 
@@ -176,21 +184,31 @@ def build_recommendations(i: dict, root: Path) -> list:
         recs.append(("high", "Install git (used for versioned run logs).",
                      install_hint.format(pkg="git")))
 
-    # Host control readiness
-    if osname == "Darwin" and i["apple_silicon"]:
-        if not i["python_ok_control"]:
-            recs.append(("high", "Install Python 3.11+ to enable real host control (cua).",
-                         "brew install python@3.12  # then: PYTHON=python3.12 bash scripts/setup.sh"))
-        recs.append(("high", "Grant Accessibility + Screen Recording to your terminal/IDE "
-                     "(System Settings > Privacy & Security).", None))
-        recs.append(("medium", "Install host control (cua-agent + Cua Driver).",
-                     "pip install 'cua-agent[all]' && "
-                     "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/"
-                     "trycua/cua/main/libs/cua-driver/scripts/install.sh)\""))
-    elif osname in ("Linux", "Windows"):
-        recs.append(("medium", "Background host control via the Cua Driver is macOS-only. "
-                     "On this OS use the cua sandbox/VM path or stay in plan-only mode.",
-                     "pip install 'cua-agent[all]'"))
+    # Host control readiness (via the Cua Driver - the host-first product).
+    if not i["tools"]["cua-driver"]:
+        if osname == "Darwin":
+            recs.append(("high", "Install the Cua Driver (drives your real Mac in the background).",
+                         "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/"
+                         "trycua/cua/main/libs/cua-driver/scripts/install.sh)\""))
+        elif osname == "Linux":
+            recs.append(("medium", "Install the Cua Driver (Linux backend is pre-release).",
+                         "see https://cua.ai/docs/cua-driver/guide/getting-started/installation"))
+        else:
+            recs.append(("medium", "Install the Cua Driver for host control.",
+                         "see https://cua.ai/docs/cua-driver/guide/getting-started/installation"))
+    else:
+        recs.append(("medium", "Start the Cua Driver daemon (TCC attaches to the app bundle).",
+                     "open -n -g -a CuaDriver --args serve   # macOS"))
+
+    if osname == "Darwin":
+        recs.append(("high", "Grant Accessibility + Screen Recording to CuaDriver.app AND your "
+                     "terminal/IDE (System Settings > Privacy & Security).", None))
+
+    # The cua-agent SDK (sandbox/VM) is optional and the only piece needing 3.11+.
+    if not i["python_ok_control"]:
+        recs.append(("low", "Optional: install Python 3.11+ only if you also want the cua-agent "
+                     "SDK sandbox backend (host control does NOT need it).",
+                     "brew install python@3.12"))
 
     # Local models
     if not i["tools"]["ollama"]:
@@ -228,8 +246,8 @@ def render(i: dict, recs: list) -> None:
     print(f"  OS            {i['os']} {i['os_release']} ({i['arch']})"
           + ("  Apple Silicon" if i["apple_silicon"] else ""))
     print(f"  Python        {i['python']}  "
-          + (green("plan-only ok") if i["python_ok_planonly"] else red("too old")) + "  "
-          + (green("host-control ok") if i["python_ok_control"] else yellow("needs 3.11 for cua")))
+          + (green("ok") if i["python_ok_planonly"] else red("too old (need 3.9+)"))
+          + dim("   (3.11+ only needed for the optional cua-agent SDK sandbox)"))
     print(f"  CPU / RAM     {i['cpu_count']} cores / {i['ram_gb']} GB")
 
     print(bold("\nTooling"))

@@ -23,23 +23,30 @@ from .rules import Action, ApprovalGate, Decision, RuleSet
 
 
 def _import_cua():
-    """Return (Computer, ComputerAgent) across known cua module layouts."""
+    """Return (Computer, ComputerAgent) across known cua module layouts.
+
+    0.8.x: Computer lives in `computer`, ComputerAgent in `cua_agent` (or the
+    `cua` meta-package). 0.4.x legacy used `agent`.
+    """
     errors = []
-    # Newer layout: top-level `cua` plus `agent` packages.
-    for computer_path, agent_path in (
-        ("computer", "agent"),
-        ("cua", "cua_agent"),
-        ("cua.computer", "cua.agent"),
-    ):
+    # (computer_module, ComputerAttr, agent_module, AgentAttr)
+    candidates = (
+        ("computer", "Computer", "cua_agent", "ComputerAgent"),  # 0.8.x
+        ("computer", "Computer", "cua", "ComputerAgent"),        # meta-package
+        ("computer", "Computer", "agent", "ComputerAgent"),      # 0.4.x legacy
+        ("cua", "Computer", "cua", "ComputerAgent"),
+    )
+    for cmod, cattr, amod, aattr in candidates:
         try:
-            comp_mod = __import__(computer_path, fromlist=["Computer"])
-            agent_mod = __import__(agent_path, fromlist=["ComputerAgent"])
-            return getattr(comp_mod, "Computer"), getattr(agent_mod, "ComputerAgent")
+            comp_mod = __import__(cmod, fromlist=[cattr])
+            agent_mod = __import__(amod, fromlist=[aattr])
+            return getattr(comp_mod, cattr), getattr(agent_mod, aattr)
         except Exception as exc:  # try the next layout
-            errors.append(f"{computer_path}/{agent_path}: {exc}")
+            errors.append(f"{cmod}.{cattr}+{amod}.{aattr}: {exc}")
     raise ImportError(
-        "cua-agent not available. Install with: pip install 'cua-agent[all]' "
-        "(requires Python >=3.11) and the Cua Driver. Tried: " + " | ".join(errors)
+        "cua-agent SDK not importable. Install with: pip install 'cua-agent[all]' "
+        "(Python >=3.11). NOTE: the SDK targets sandboxes/VMs; for HOST control "
+        "use backend=driver (the Cua Driver). Tried: " + " | ".join(errors)
     )
 
 
@@ -80,33 +87,51 @@ def run_cua_task(
 ) -> RunResult:
     Computer, ComputerAgent = _import_cua()
     spec = config.model(model_key)
-
-    gated = _make_gated_callback(gate, logger)
     steps: List[Step] = []
 
+    def _text_of(result) -> str:
+        """Extract human text from a cua-agent 0.8 result dict (or object)."""
+        try:
+            out = result["output"] if isinstance(result, dict) else getattr(result, "output", None)
+            if out:
+                chunks = []
+                for item in out:
+                    if isinstance(item, dict) and item.get("type") == "message":
+                        content = item.get("content") or []
+                        for c in content:
+                            if isinstance(c, dict) and c.get("text"):
+                                chunks.append(c["text"])
+                if chunks:
+                    return "\n".join(chunks)
+        except Exception:
+            pass
+        if isinstance(result, dict) and result.get("text"):
+            return str(result["text"])
+        return str(result)
+
     async def _run() -> str:
-        # NOTE: keyword names below follow the documented cua-agent SDK. If a
-        # newer version renames them, adjust here - this is the single seam
-        # between Second Brain and cua.
-        async with Computer() as computer:  # background host control via Cua Driver
-            agent = ComputerAgent(
-                computer=computer,
-                model=spec.model,
-                instructions=ruleset.system_prompt or None,
-                callbacks=[gated],
-                max_trajectory_budget=config.max_steps,
-            )
+        # cua-agent 0.8 API: ComputerAgent(model=..., tools=[computer]).
+        # NOTE: Computer() targets a cua sandbox/VM, not your host. For host
+        # control use backend=driver. Rules are injected via a system message
+        # since this API has no `instructions` kwarg.
+        async with Computer() as computer:
+            agent = ComputerAgent(model=spec.model, tools=[computer])
+            messages = []
+            if ruleset.system_prompt:
+                messages.append({"role": "system", "content": ruleset.system_prompt})
+            messages.append({"role": "user", "content": task})
             final_text = ""
             i = 0
-            async for event in agent.run(task):
+            async for result in agent.run(messages):
                 i += 1
-                text = getattr(event, "text", None) or str(event)
-                logger.log_event("cua_event", {"index": i, "event": text})
-                step = Step(i, text, Decision.ALLOW.value, "cua step", executed=True, output=text)
+                text = _text_of(result)
+                logger.log_event("cua_event", {"index": i, "event": text[:4000]})
+                step = Step(i, text[:300], Decision.ALLOW.value, "cua step", executed=True, output=text[:1000])
                 steps.append(step)
                 if on_step:
                     on_step(step)
-                final_text = text
+                if text:
+                    final_text = text
             return final_text
 
     summary = asyncio.run(_run())
